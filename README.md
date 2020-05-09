@@ -1,75 +1,248 @@
 
-####VoiceLine，一个可以根据麦克风音量大小，显示一些波形效果的控件。一共有两种效果，波开和矩形，如下。也有一些自定义属性，包括波形的颜色，灵敏度，间隔等。
+#### Android 插件化，绕过安卓的清单文件，目前适用于与 安卓9.0一下，9.0以上的还需在看源码
 
-![image](https://github.com/ws123/VoiceLine/blob/master/line.gif)
-![image](https://github.com/ws123/VoiceLine/blob/master/rect.gif)
-
-引用方法：
-
-```groovy
-compile 'com.carlos.voiceline:mylibrary:1.0.6'
+#### 使用
 ```
-####自定义属性列表如下：
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <declare-styleable name="voiceView">
-        <!--中间线的颜色，就是波形的时候，大家可以看到，中间有一条直线，就是那个-->
-        <attr name="middleLine" format="color" />
-        <!--中间线的高度，因为宽度是充满的-->
-        <attr name="middleLineHeight" format="dimension" />
-        <!--波动的线的颜色，如果是距形样式的话，刚是距形的颜色-->
-        <attr name="voiceLine" format="color" />
-        <!--波动线的横向移动速度，线的速度的反比，即这个值越小，线横向移动越快，越大线移动越慢，默认90-->
-        <attr name="lineSpeed" format="integer" />
-        <!--矩形的宽度-->
-        <attr name="rectWidth" format="dimension" />
-        <!--矩形之间的间隔-->
-        <attr name="rectSpace" format="dimension" />
-        <!--矩形的初始高度，就是没有声音的时候，矩形的高度-->
-        <attr name="rectInitHeight" format="dimension" />
-        <!--所输入音量的最大值-->
-        <attr name="maxVolume" format="float" />
-        <!--控件的样式，一共有两种，波形或者矩形-->
-        <attr name="viewMode">
-            <enum name="line" value="0" />
-            <enum name="rect" value="1" />
-        </attr>
-        <!--灵敏度，默认值是4-->
-        <attr name="sensibility">
-            <enum name="one" value="1" />
-            <enum name="two" value="2" />
-            <enum name="three" value="3" />
-            <enum name="four" value="4" />
-            <enum name="five" value="5" />
-        </attr>
-        <!--精细度，绘制曲线的时候，每几个像素绘制一次，默认是1，一般，这个值越小，曲线越顺滑，
-            但在一些旧手机上，会出现帧率过低的情况，可以把这个值调大一点，在图片的顺滑度与帧率之间做一个取舍-->
-        <attr name="fineness">
-            <enum name="one" value="1" />
-            <enum name="two" value="2" />
-            <enum name="three" value="3" />
-        </attr>
-    </declare-styleable>
-</resources>
-```
-实际使用过程中，可以这样配置：
+调用
 
-```xml
-    <com.carlos.voiceline.mylibrary.VoiceLineView
-        android:id="@+id/voicLine"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@android:color/white"
-        voiceView:maxVolume="200"
-        voiceView:middleLine="@android:color/holo_red_light"
-        voiceView:middleLineHeight="1dp"
-        voiceView:fineness="three"
-        voiceView:rectSpace="2dp"
-        voiceView:rectWidth="5dp"
-        voiceView:sensibility="four"
-        voiceView:viewMode="line"
-        voiceView:voiceLine="@android:color/holo_red_light" /> 
+HookStartActivityUtil.init(this,ProxyActivity.class);
+
+
+public class HookStartActivityUtil {
+
+    public static void init(Context context, Class<?> proxyClass) {
+        new HookStartActivityUtil(context, proxyClass);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            hookActivityManagerAndroidO();
+        } else {
+
+            hookStartActivity();
+        }
+        hookLaunchActivity();
+        hookPackageManager(context);
+    }
+
+
+
+    private static Context mContext;
+    private static Class<?> mProxyClass;
+
+    private HookStartActivityUtil(Context context, Class<?> proxyClass) {
+        mContext = context.getApplicationContext();
+        mProxyClass = proxyClass;
+    }
+
+    private static void hookActivityManagerAndroidO() {
+
+        try {
+            //1. 获取 ActivityManager 里面的gDefault
+            Class<?> amnClass = Class.forName("android.app.ActivityManager");
+
+            // 获取属性
+            Field iActivityManagerSingleton = amnClass.getDeclaredField("IActivityManagerSingleton");
+            iActivityManagerSingleton.setAccessible(true);
+            Object IActivityManagerSingleton = iActivityManagerSingleton.get(null);
+
+            //2. 获取  IActivityManagerSingleton 中的mInstance属性
+
+            Class<?> SingletonClass = Class.forName("android.util.Singleton");
+
+            Field mInstance = SingletonClass.getDeclaredField("mInstance");
+            mInstance.setAccessible(true);
+            Object IActivityManager = mInstance.get(IActivityManagerSingleton);
+
+            Class<?> iamClass = Class.forName("android.app.IActivityManager");
+
+            Object proxy = Proxy.newProxyInstance(
+                    HookStartActivityUtil.class.getClassLoader(),
+                    new Class[]{iamClass},
+                    new StartActivityInvocationHandler(IActivityManager)
+            );
+
+            // 重新指定
+            mInstance.set(IActivityManagerSingleton, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    private static void hookStartActivity() {
+
+        try {
+            // 3.1 获取ActivityManagerNative里面的gDefault
+            Class<?> amnClass = Class.forName("android.app.ActivityManagerNative");
+            // 获取属性
+            Field gDefaultField = amnClass.getDeclaredField("gDefault");
+            // 设置权限
+            gDefaultField.setAccessible(true);
+            Object gDefault = gDefaultField.get(null);
+
+            // 3.2 获取gDefault中的mInstance属性
+            Class<?> singletonClass = Class.forName("android.util.Singleton");
+            Field mInstanceField = singletonClass.getDeclaredField("mInstance");
+            mInstanceField.setAccessible(true);
+            Object iamInstance = mInstanceField.get(gDefault);
+
+            Class<?> iamClass = Class.forName("android.app.IActivityManager");
+            Object proxy = Proxy.newProxyInstance(HookStartActivityUtil.class.getClassLoader(),
+                    new Class[]{iamClass},
+                    // InvocationHandler 必须执行者，谁去执行
+                    new StartActivityInvocationHandler(iamInstance));
+
+            // 3.重新指定
+            mInstanceField.set(gDefault, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void hookLaunchActivity() {
+
+        try {
+            //1. 获取ActivityThread实例
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Field sCurrentActivityThreadField = activityThread.getDeclaredField("sCurrentActivityThread");
+            sCurrentActivityThreadField.setAccessible(true);
+            Object sCurrentActivityThread = sCurrentActivityThreadField.get(null);
+            //2. 获取ActivityThread中的mH
+            // 设置权限
+            Field mHField = activityThread.getDeclaredField("mH");
+            mHField.setAccessible(true);
+            Object mHandler = mHField.get(sCurrentActivityThread);
+            //3. hook handleLaunchActivity
+            // 给 mHandler 设置 CallBack回调,只能通过反射
+            Class<?> handlerClass = Class.forName("android.os.Handler");
+            Field mCallbackField = handlerClass.getDeclaredField("mCallback");
+            mCallbackField.setAccessible(true);
+            mCallbackField.set(mHandler, new HandlerCallBack());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static class HandlerCallBack implements Handler.Callback {
+        @Override
+        public boolean handleMessage(Message msg) {
+            // 每发消息，都会执行CallBack
+            // 100 为  LAUNCH_ACTIVITY
+            if (msg.what == 100) {
+                LogU.d("成功获取");
+                handleLaunchActivity(msg);
+            }
+            return false;
+        }
+
+        /**
+         * 开始启动创建Activity拦截
+         *
+         * @param msg
+         */
+        private void handleLaunchActivity(Message msg) {
+            Object record = msg.obj;
+            // 1. 从ActivityClientRecord 获取过安检的intent
+            try {
+                Field intentField = record.getClass().getDeclaredField("intent");
+                intentField.setAccessible(true);
+                Intent safeIntent = (Intent) intentField.get(record);
+                // 2. 从safeIntent中获取原来的originIntent
+                Intent originIntent = safeIntent.getParcelableExtra(HookConfig.EXTRA_ORIGIN_INTENT);
+                LogU.d("获取到了 原始的 originIntent" + originIntent);
+                // 3. 重新设置回去
+                if (originIntent != null) {
+                    intentField.set(record, originIntent);
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+        }
+    }
+
+    private static class StartActivityInvocationHandler implements InvocationHandler {
+
+        private Object mObject;
+
+        public StartActivityInvocationHandler(Object object) {
+            mObject = object;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+
+            LogU.d("获取到了 IActivityManager 的所有方法" + method.getName());
+            // 替换 Intent,过 AndroidManifest.xml 的检测
+            //if (method.getName())
+            if (method.getName().equals("startActivity")) {
+                // 1. 首先获取原来的Intent
+                int index = 0;
+                for (int i = 0; i < args.length; i++) {
+                    if (args[i] instanceof Intent) {
+                        index = i;
+                        break;
+                    }
+                }
+                Intent originIntent = (Intent) args[index];
+                LogU.d("获取 originIntent" + originIntent);
+                // 2. 创建一个安全的activity
+                Intent saveIntent = new Intent(mContext, mProxyClass);
+                // 绑定原来的Intent
+                saveIntent.putExtra(HookConfig.EXTRA_ORIGIN_INTENT, originIntent);
+                args[2] = saveIntent;
+
+            }
+
+            return method.invoke(mObject, args);
+
+        }
+    }
+
+    private static void hookPackageManager(Context context) {
+        try {
+            // 兼容AppCompatActivity报错问题
+            Class<?> forName = Class.forName("android.app.ActivityThread");
+            Field field = forName.getDeclaredField("sCurrentActivityThread");
+            field.setAccessible(true);
+            Object activityThread = field.get(null);
+            // 我自己执行一次那么就会创建PackageManager，系统再获取的时候就是下面的iPackageManager
+            Method getPackageManager = activityThread.getClass().getDeclaredMethod("getPackageManager");
+            Object iPackageManager = getPackageManager.invoke(activityThread);
+
+            PackageManagerHandler handler = new PackageManagerHandler(iPackageManager);
+            Class<?> iPackageManagerIntercept = Class.forName("android.content.pm.IPackageManager");
+            Object proxy = Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
+                    new Class<?>[]{iPackageManagerIntercept}, handler);
+
+            // 获取 sPackageManager 属性
+            Field iPackageManagerField = activityThread.getClass().getDeclaredField("sPackageManager");
+            iPackageManagerField.setAccessible(true);
+            iPackageManagerField.set(activityThread, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static class PackageManagerHandler implements InvocationHandler {
+        private Object mActivityManagerObject;
+
+        public PackageManagerHandler(Object iActivityManagerObject) {
+            this.mActivityManagerObject = iActivityManagerObject;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            // Log.e("TAG", "methodName = " + method.getName());
+            if (method.getName().startsWith("getActivityInfo")) {
+                ComponentName componentName = new ComponentName(mContext, mProxyClass);
+                args[0] = componentName;
+            }
+            return method.invoke(mActivityManagerObject, args);
+        }
+    }
+
+}
+ 
 ```
 
 ### License
