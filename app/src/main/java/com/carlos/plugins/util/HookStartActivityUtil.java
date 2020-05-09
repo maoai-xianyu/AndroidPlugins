@@ -1,6 +1,5 @@
 package com.carlos.plugins.util;
 
-
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -20,104 +19,118 @@ import java.lang.reflect.Proxy;
  */
 public class HookStartActivityUtil {
 
+    public static void init(Context context, Class<?> proxyClass) {
+        new HookStartActivityUtil(context, proxyClass);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            hookActivityManagerAndroidO();
+        } else {
 
-    private Context mContext;
-    private Class<?> mProxyClass;
+            hookStartActivity();
+        }
+        hookLaunchActivity();
+        hookPackageManager(context);
+    }
 
-    public HookStartActivityUtil(Context context, Class<?> proxyClass) {
+
+
+    private static Context mContext;
+    private static Class<?> mProxyClass;
+
+    private HookStartActivityUtil(Context context, Class<?> proxyClass) {
         mContext = context.getApplicationContext();
         mProxyClass = proxyClass;
     }
 
-    public void hookStartActivityAll() throws Exception {
+    private static void hookActivityManagerAndroidO() {
 
-        if (Build.VERSION.SDK_INT >= 26) {
-            hookActivityManagerAndroidO();
-        } else {
-            hookStartActivity();
+        try {
+            //1. 获取 ActivityManager 里面的gDefault
+            Class<?> amnClass = Class.forName("android.app.ActivityManager");
+
+            // 获取属性
+            Field iActivityManagerSingleton = amnClass.getDeclaredField("IActivityManagerSingleton");
+            iActivityManagerSingleton.setAccessible(true);
+            Object IActivityManagerSingleton = iActivityManagerSingleton.get(null);
+
+            //2. 获取  IActivityManagerSingleton 中的mInstance属性
+
+            Class<?> SingletonClass = Class.forName("android.util.Singleton");
+
+            Field mInstance = SingletonClass.getDeclaredField("mInstance");
+            mInstance.setAccessible(true);
+            Object IActivityManager = mInstance.get(IActivityManagerSingleton);
+
+            Class<?> iamClass = Class.forName("android.app.IActivityManager");
+
+            Object proxy = Proxy.newProxyInstance(
+                    HookStartActivityUtil.class.getClassLoader(),
+                    new Class[]{iamClass},
+                    new StartActivityInvocationHandler(IActivityManager)
+            );
+
+            // 重新指定
+            mInstance.set(IActivityManagerSingleton, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    private static void hookStartActivity() {
+
+        try {
+            // 3.1 获取ActivityManagerNative里面的gDefault
+            Class<?> amnClass = Class.forName("android.app.ActivityManagerNative");
+            // 获取属性
+            Field gDefaultField = amnClass.getDeclaredField("gDefault");
+            // 设置权限
+            gDefaultField.setAccessible(true);
+            Object gDefault = gDefaultField.get(null);
+
+            // 3.2 获取gDefault中的mInstance属性
+            Class<?> singletonClass = Class.forName("android.util.Singleton");
+            Field mInstanceField = singletonClass.getDeclaredField("mInstance");
+            mInstanceField.setAccessible(true);
+            Object iamInstance = mInstanceField.get(gDefault);
+
+            Class<?> iamClass = Class.forName("android.app.IActivityManager");
+            Object proxy = Proxy.newProxyInstance(HookStartActivityUtil.class.getClassLoader(),
+                    new Class[]{iamClass},
+                    // InvocationHandler 必须执行者，谁去执行
+                    new StartActivityInvocationHandler(iamInstance));
+
+            // 3.重新指定
+            mInstanceField.set(gDefault, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
-    private void hookStartActivity() throws Exception {
-        // 3.1 获取ActivityManagerNative里面的gDefault
-        Class<?> amnClass = Class.forName("android.app.ActivityManagerNative");
-        // 获取属性
-        Field gDefaultField = amnClass.getDeclaredField("gDefault");
-        // 设置权限
-        gDefaultField.setAccessible(true);
-        Object gDefault = gDefaultField.get(null);
+    private static void hookLaunchActivity() {
 
-        // 3.2 获取gDefault中的mInstance属性
-        Class<?> singletonClass = Class.forName("android.util.Singleton");
-        Field mInstanceField = singletonClass.getDeclaredField("mInstance");
-        mInstanceField.setAccessible(true);
-        Object iamInstance = mInstanceField.get(gDefault);
-
-        Class<?> iamClass = Class.forName("android.app.IActivityManager");
-        Object proxy = Proxy.newProxyInstance(HookStartActivityUtil.class.getClassLoader(),
-                new Class[]{iamClass},
-                // InvocationHandler 必须执行者，谁去执行
-                new StartActivityInvocationHandler(iamInstance));
-
-        // 3.重新指定
-        mInstanceField.set(gDefault, proxy);
+        try {
+            //1. 获取ActivityThread实例
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Field sCurrentActivityThreadField = activityThread.getDeclaredField("sCurrentActivityThread");
+            sCurrentActivityThreadField.setAccessible(true);
+            Object sCurrentActivityThread = sCurrentActivityThreadField.get(null);
+            //2. 获取ActivityThread中的mH
+            // 设置权限
+            Field mHField = activityThread.getDeclaredField("mH");
+            mHField.setAccessible(true);
+            Object mHandler = mHField.get(sCurrentActivityThread);
+            //3. hook handleLaunchActivity
+            // 给 mHandler 设置 CallBack回调,只能通过反射
+            Class<?> handlerClass = Class.forName("android.os.Handler");
+            Field mCallbackField = handlerClass.getDeclaredField("mCallback");
+            mCallbackField.setAccessible(true);
+            mCallbackField.set(mHandler, new HandlerCallBack());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-
-    private void hookActivityManagerAndroidO() throws Exception {
-
-        //1. 获取 ActivityManager 里面的gDefault
-        Class<?> amnClass = Class.forName("android.app.ActivityManager");
-
-        // 获取属性
-        Field iActivityManagerSingleton = amnClass.getDeclaredField("IActivityManagerSingleton");
-        iActivityManagerSingleton.setAccessible(true);
-        Object IActivityManagerSingleton = iActivityManagerSingleton.get(null);
-
-        //2. 获取  IActivityManagerSingleton 中的mInstance属性
-
-        Class<?> SingletonClass = Class.forName("android.util.Singleton");
-
-        Field mInstance = SingletonClass.getDeclaredField("mInstance");
-        mInstance.setAccessible(true);
-        Object IActivityManager = mInstance.get(IActivityManagerSingleton);
-
-        Class<?> iamClass = Class.forName("android.app.IActivityManager");
-
-        Object proxy  = Proxy.newProxyInstance(
-                HookStartActivityUtil.class.getClassLoader(),
-                new Class[]{iamClass},
-                new StartActivityInvocationHandler(IActivityManager)
-        );
-
-        // 重新指定
-        mInstance.set(IActivityManagerSingleton,proxy);
-
-    }
-
-
-    public void hookLaunchActivity() throws Exception {
-
-        //1. 获取ActivityThread实例
-        Class<?> activityThread = Class.forName("android.app.ActivityThread");
-        Field sCurrentActivityThreadField = activityThread.getDeclaredField("sCurrentActivityThread");
-        sCurrentActivityThreadField.setAccessible(true);
-        Object sCurrentActivityThread = sCurrentActivityThreadField.get(null);
-        //2. 获取ActivityThread中的mH
-        // 设置权限
-        Field mHField = activityThread.getDeclaredField("mH");
-        mHField.setAccessible(true);
-        Object mHandler = mHField.get(sCurrentActivityThread);
-        //3. hook handleLaunchActivity
-        // 给 mHandler 设置 CallBack回调,只能通过反射
-        Class<?> handlerClass = Class.forName("android.os.Handler");
-        Field mCallbackField = handlerClass.getDeclaredField("mCallback");
-        mCallbackField.setAccessible(true);
-        mCallbackField.set(mHandler, new HandlerCallBack());
-
-    }
-
-    private class HandlerCallBack implements Handler.Callback {
+    private static class HandlerCallBack implements Handler.Callback {
         @Override
         public boolean handleMessage(Message msg) {
             // 每发消息，都会执行CallBack
@@ -149,25 +162,6 @@ public class HookStartActivityUtil {
                     intentField.set(record, originIntent);
                 }
 
-                // 兼容AppCompatActivity报错问题
-                Class<?> forName = Class.forName("android.app.ActivityThread");
-                Field field = forName.getDeclaredField("sCurrentActivityThread");
-                field.setAccessible(true);
-                Object activityThread = field.get(null);
-                // 我自己执行一次那么就会创建PackageManager，系统再获取的时候就是下面的iPackageManager
-                Method getPackageManager = activityThread.getClass().getDeclaredMethod("getPackageManager");
-                Object iPackageManager = getPackageManager.invoke(activityThread);
-
-                PackageManagerHandler handler = new PackageManagerHandler(iPackageManager);
-                Class<?> iPackageManagerIntercept = Class.forName("android.content.pm.IPackageManager");
-                Object proxy = Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
-                        new Class<?>[]{iPackageManagerIntercept}, handler);
-
-                // 获取 sPackageManager 属性
-                Field iPackageManagerField = activityThread.getClass().getDeclaredField("sPackageManager");
-                iPackageManagerField.setAccessible(true);
-                iPackageManagerField.set(activityThread, proxy);
-
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -175,27 +169,7 @@ public class HookStartActivityUtil {
         }
     }
 
-
-    private class PackageManagerHandler implements InvocationHandler {
-        private Object mActivityManagerObject;
-
-        public PackageManagerHandler(Object iActivityManagerObject) {
-            this.mActivityManagerObject = iActivityManagerObject;
-        }
-
-        @Override
-        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-            // Log.e("TAG", "methodName = " + method.getName());
-            if (method.getName().startsWith("getActivityInfo")) {
-                ComponentName componentName = new ComponentName(mContext, mProxyClass);
-                args[0] = componentName;
-            }
-            return method.invoke(mActivityManagerObject, args);
-        }
-    }
-
-
-    private class StartActivityInvocationHandler implements InvocationHandler {
+    private static class StartActivityInvocationHandler implements InvocationHandler {
 
         private Object mObject;
 
@@ -232,4 +206,48 @@ public class HookStartActivityUtil {
 
         }
     }
+
+    private static void hookPackageManager(Context context) {
+        try {
+            // 兼容AppCompatActivity报错问题
+            Class<?> forName = Class.forName("android.app.ActivityThread");
+            Field field = forName.getDeclaredField("sCurrentActivityThread");
+            field.setAccessible(true);
+            Object activityThread = field.get(null);
+            // 我自己执行一次那么就会创建PackageManager，系统再获取的时候就是下面的iPackageManager
+            Method getPackageManager = activityThread.getClass().getDeclaredMethod("getPackageManager");
+            Object iPackageManager = getPackageManager.invoke(activityThread);
+
+            PackageManagerHandler handler = new PackageManagerHandler(iPackageManager);
+            Class<?> iPackageManagerIntercept = Class.forName("android.content.pm.IPackageManager");
+            Object proxy = Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
+                    new Class<?>[]{iPackageManagerIntercept}, handler);
+
+            // 获取 sPackageManager 属性
+            Field iPackageManagerField = activityThread.getClass().getDeclaredField("sPackageManager");
+            iPackageManagerField.setAccessible(true);
+            iPackageManagerField.set(activityThread, proxy);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static class PackageManagerHandler implements InvocationHandler {
+        private Object mActivityManagerObject;
+
+        public PackageManagerHandler(Object iActivityManagerObject) {
+            this.mActivityManagerObject = iActivityManagerObject;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            // Log.e("TAG", "methodName = " + method.getName());
+            if (method.getName().startsWith("getActivityInfo")) {
+                ComponentName componentName = new ComponentName(mContext, mProxyClass);
+                args[0] = componentName;
+            }
+            return method.invoke(mActivityManagerObject, args);
+        }
+    }
+
 }

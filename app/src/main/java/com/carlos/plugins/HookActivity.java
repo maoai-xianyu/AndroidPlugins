@@ -5,6 +5,8 @@ import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 
+import com.carlos.plugins.util.HookStartActivityUtil;
+
 
 public class HookActivity extends AppCompatActivity {
 
@@ -13,7 +15,6 @@ public class HookActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_hook);
 
-        //HookHelper.init(this);
         HookStartActivityUtil.init(this,ProxyActivity.class);
     }
 
